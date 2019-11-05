@@ -105,6 +105,11 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	}
 	if readSQL != nil {
 		db.readDB = readSQL
+		if d, ok := readSQL.(*sql.DB); ok {
+			if err = d.Ping(); err != nil {
+				d.Close()
+			}
+		}
 	}
 	// Send a ping to make sure the database connection is alive.
 	if d, ok := dbSQL.(*sql.DB); ok {
@@ -129,6 +134,11 @@ type closer interface {
 
 // Close close current db connection.  If database connection is not an io.Closer, returns an error.
 func (s *DB) Close() error {
+	if s.readDB != nil {
+		if db, ok := s.readDB.(closer); ok {
+			db.Close()
+		}
+	}
 	if db, ok := s.parent.db.(closer); ok {
 		return db.Close()
 	}
@@ -344,7 +354,7 @@ func (s *DB) Assign(attrs ...interface{}) *DB {
 
 // First find first record that match given conditions, order by primary key
 func (s *DB) First(out interface{}, where ...interface{}) *DB {
-	newScope := s.NewScope(out)
+	newScope := s.NewScope(out, true)
 	newScope.Search.Limit(1)
 
 	return newScope.Set("gorm:order_by_primary_key", "ASC").
@@ -353,14 +363,14 @@ func (s *DB) First(out interface{}, where ...interface{}) *DB {
 
 // Take return a record that match given conditions, the order will depend on the database implementation
 func (s *DB) Take(out interface{}, where ...interface{}) *DB {
-	newScope := s.NewScope(out)
+	newScope := s.NewScope(out, true)
 	newScope.Search.Limit(1)
 	return newScope.inlineCondition(where...).callCallbacks(s.parent.callbacks.queries).db
 }
 
 // Last find last record that match given conditions, order by primary key
 func (s *DB) Last(out interface{}, where ...interface{}) *DB {
-	newScope := s.NewScope(out)
+	newScope := s.NewScope(out, true)
 	newScope.Search.Limit(1)
 	return newScope.Set("gorm:order_by_primary_key", "DESC").
 		inlineCondition(where...).callCallbacks(s.parent.callbacks.queries).db
@@ -368,7 +378,7 @@ func (s *DB) Last(out interface{}, where ...interface{}) *DB {
 
 // Find find records that match given conditions
 func (s *DB) Find(out interface{}, where ...interface{}) *DB {
-	return s.NewScope(out).inlineCondition(where...).callCallbacks(s.parent.callbacks.queries).db
+	return s.NewScope(out, true).inlineCondition(where...).callCallbacks(s.parent.callbacks.queries).db
 }
 
 //Preloads preloads relations, don`t touch out
@@ -383,18 +393,18 @@ func (s *DB) Scan(dest interface{}) *DB {
 
 // Row return `*sql.Row` with given conditions
 func (s *DB) Row() *sql.Row {
-	return s.NewScope(s.Value).row()
+	return s.NewScope(s.Value, true).row()
 }
 
 // Rows return `*sql.Rows` with given conditions
 func (s *DB) Rows() (*sql.Rows, error) {
-	return s.NewScope(s.Value).rows()
+	return s.NewScope(s.Value, true).rows()
 }
 
 // ScanRows scan `*sql.Rows` to give struct
 func (s *DB) ScanRows(rows *sql.Rows, result interface{}) error {
 	var (
-		scope        = s.NewScope(result)
+		scope        = s.NewScope(result, true)
 		clone        = scope.db
 		columns, err = rows.Columns()
 	)
@@ -410,12 +420,12 @@ func (s *DB) ScanRows(rows *sql.Rows, result interface{}) error {
 //     var ages []int64
 //     db.Find(&users).Pluck("age", &ages)
 func (s *DB) Pluck(column string, value interface{}) *DB {
-	return s.NewScope(s.Value).pluck(column, value).db
+	return s.NewScope(s.Value, true).pluck(column, value).db
 }
 
 // Count get how many records for a model
 func (s *DB) Count(value interface{}) *DB {
-	return s.NewScope(s.Value).count(value).db
+	return s.NewScope(s.Value, true).count(value).db
 }
 
 // Related get related associations
@@ -833,7 +843,9 @@ func (s *DB) GetErrors() []error {
 
 func (s *DB) clone(isRead ...bool) *DB {
 	var db = &DB{}
-	if len(isRead) != 0 && isRead[0] == true {
+	if len(isRead) != 0 &&
+		isRead[0] == true &&
+		db.readDB != nil {
 		db = &DB{
 			db:                s.readDB,
 			parent:            s.parent,
