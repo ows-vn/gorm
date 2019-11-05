@@ -86,6 +86,10 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 		if len(args) >= 2 {
 			readSource := args[1].(string)
 			readSQL, err = sql.Open(driver, readSource)
+			if err != nil {
+				println("connect read db error ", err)
+				readSQL = nil
+			}
 		}
 
 	case SQLCommon:
@@ -296,7 +300,7 @@ func (s *DB) Order(value interface{}, reorder ...bool) *DB {
 // Select specify fields that you want to retrieve from database when querying, by default, will select all fields;
 // When creating/updating, specify fields that you want to save to database
 func (s *DB) Select(query interface{}, args ...interface{}) *DB {
-	return s.clone().search.Select(query, args...).db
+	return s.clone(true).search.Select(query, args...).db
 }
 
 // Omit specify fields that you want to ignore when saving to database for creating, updating
@@ -847,12 +851,10 @@ func (s *DB) GetErrors() []error {
 func (s *DB) clone(isRead ...bool) *DB {
 	var db = &DB{}
 	ranNum := rand.Float32()
-	delta := 1 - s.readWeight
 	if len(isRead) != 0 &&
 		isRead[0] == true &&
-		db.readDB != nil &&
-		ranNum >= delta {
-		s.log("will user readDB ", ranNum)
+		s.readDB != nil &&
+		ranNum >= s.readWeight {
 		db = &DB{
 			db:                s.readDB,
 			parent:            s.parent,
@@ -863,6 +865,8 @@ func (s *DB) clone(isRead ...bool) *DB {
 			blockGlobalUpdate: s.blockGlobalUpdate,
 			dialect:           newDialect(s.dialect.GetName(), s.db),
 			nowFuncOverride:   s.nowFuncOverride,
+			readDB:            s.readDB,
+			readWeight:        s.readWeight,
 		}
 	} else {
 		db = &DB{
@@ -875,6 +879,8 @@ func (s *DB) clone(isRead ...bool) *DB {
 			blockGlobalUpdate: s.blockGlobalUpdate,
 			dialect:           newDialect(s.dialect.GetName(), s.db),
 			nowFuncOverride:   s.nowFuncOverride,
+			readDB:            s.readDB,
+			readWeight:        s.readWeight,
 		}
 	}
 
