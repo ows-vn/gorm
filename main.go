@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
@@ -36,7 +37,8 @@ type DB struct {
 	nowFuncOverride func() time.Time
 
 	//add read db for sql cluster
-	readDB SQLCommon
+	readDB     SQLCommon
+	readWeight float32
 }
 
 type logModeValue int
@@ -105,6 +107,7 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	}
 	if readSQL != nil {
 		db.readDB = readSQL
+		db.readWeight = 0.8
 		if d, ok := readSQL.(*sql.DB); ok {
 			if err = d.Ping(); err != nil {
 				d.Close()
@@ -843,9 +846,13 @@ func (s *DB) GetErrors() []error {
 
 func (s *DB) clone(isRead ...bool) *DB {
 	var db = &DB{}
+	ranNum := rand.Float32()
+	delta := 1 - s.readWeight
 	if len(isRead) != 0 &&
 		isRead[0] == true &&
-		db.readDB != nil {
+		db.readDB != nil &&
+		ranNum >= delta {
+		s.log("will user readDB ", ranNum)
 		db = &DB{
 			db:                s.readDB,
 			parent:            s.parent,
