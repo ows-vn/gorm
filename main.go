@@ -34,6 +34,9 @@ type DB struct {
 
 	// function to be used to override the creating of a new timestamp
 	nowFuncOverride func() time.Time
+
+	//add read db for sql cluster
+	readDB SQLCommon
 }
 
 type logModeValue int
@@ -63,18 +66,26 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	var source string
 	var dbSQL SQLCommon
 	var ownDbSQL bool
+	var readSQL SQLCommon
 
 	switch value := args[0].(type) {
 	case string:
 		var driver = dialect
-		if len(args) == 1 {
-			source = value
-		} else if len(args) >= 2 {
-			driver = value
-			source = args[1].(string)
-		}
+		// if len(args) == 1 {
+		// 	source = value
+		// } else if len(args) >= 2 {
+		// 	driver = value
+		// 	source = args[1].(string)
+		// }
+		source = value
 		dbSQL, err = sql.Open(driver, source)
 		ownDbSQL = true
+
+		if len(args) >= 2 {
+			readSource := args[1].(string)
+			readSQL, err = sql.Open(driver, readSource)
+		}
+
 	case SQLCommon:
 		dbSQL = value
 		ownDbSQL = false
@@ -91,6 +102,9 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 	db.parent = db
 	if err != nil {
 		return
+	}
+	if readSQL != nil {
+		db.readDB = readSQL
 	}
 	// Send a ping to make sure the database connection is alive.
 	if d, ok := dbSQL.(*sql.DB); ok {
@@ -197,8 +211,14 @@ func (s *DB) SingularTable(enable bool) {
 }
 
 // NewScope create a scope for current operation
-func (s *DB) NewScope(value interface{}) *Scope {
-	dbClone := s.clone()
+func (s *DB) NewScope(value interface{}, isRead ...bool) *Scope {
+	var dbClone *DB
+	if len(isRead) > 0 && isRead[0] == true {
+		dbClone = s.clone(isRead[0])
+	} else {
+		dbClone = s.clone()
+	}
+
 	dbClone.Value = value
 	scope := &Scope{db: dbClone, Value: value}
 	if s.search != nil {
@@ -811,17 +831,32 @@ func (s *DB) GetErrors() []error {
 // Private Methods For DB
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *DB) clone() *DB {
-	db := &DB{
-		db:                s.db,
-		parent:            s.parent,
-		logger:            s.logger,
-		logMode:           s.logMode,
-		Value:             s.Value,
-		Error:             s.Error,
-		blockGlobalUpdate: s.blockGlobalUpdate,
-		dialect:           newDialect(s.dialect.GetName(), s.db),
-		nowFuncOverride:   s.nowFuncOverride,
+func (s *DB) clone(isRead ...bool) *DB {
+	var db = &DB{}
+	if len(isRead) != 0 && isRead[0] == true {
+		db = &DB{
+			db:                s.readDB,
+			parent:            s.parent,
+			logger:            s.logger,
+			logMode:           s.logMode,
+			Value:             s.Value,
+			Error:             s.Error,
+			blockGlobalUpdate: s.blockGlobalUpdate,
+			dialect:           newDialect(s.dialect.GetName(), s.db),
+			nowFuncOverride:   s.nowFuncOverride,
+		}
+	} else {
+		db = &DB{
+			db:                s.db,
+			parent:            s.parent,
+			logger:            s.logger,
+			logMode:           s.logMode,
+			Value:             s.Value,
+			Error:             s.Error,
+			blockGlobalUpdate: s.blockGlobalUpdate,
+			dialect:           newDialect(s.dialect.GetName(), s.db),
+			nowFuncOverride:   s.nowFuncOverride,
+		}
 	}
 
 	s.values.Range(func(k, v interface{}) bool {
