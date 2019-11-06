@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -229,15 +230,20 @@ func (s *DB) SingularTable(enable bool) {
 
 // NewScope create a scope for current operation
 func (s *DB) NewScope(value interface{}, isRead ...bool) *Scope {
-	var dbClone *DB
-	if len(isRead) > 0 && isRead[0] == true {
-		dbClone = s.clone(isRead[0])
-	} else {
-		dbClone = s.clone()
+	dbClone := s.clone()
+	dbClone.Value = value
+
+	ranNum := rand.Float32()
+
+	scope := &Scope{db: dbClone, Value: value}
+
+	if len(isRead) > 0 &&
+		isRead[0] == true &&
+		dbClone.readDB != nil &&
+		dbClone.readWeight > ranNum {
+		scope.db.db = dbClone.readDB
 	}
 
-	dbClone.Value = value
-	scope := &Scope{db: dbClone, Value: value}
 	if s.search != nil {
 		scope.Search = s.search.clone()
 	} else {
@@ -300,7 +306,7 @@ func (s *DB) Order(value interface{}, reorder ...bool) *DB {
 // Select specify fields that you want to retrieve from database when querying, by default, will select all fields;
 // When creating/updating, specify fields that you want to save to database
 func (s *DB) Select(query interface{}, args ...interface{}) *DB {
-	return s.clone(true).search.Select(query, args...).db
+	return s.clone().search.Select(query, args...).db
 }
 
 // Omit specify fields that you want to ignore when saving to database for creating, updating
@@ -531,7 +537,13 @@ func (s *DB) Raw(sql string, values ...interface{}) *DB {
 
 // Exec execute raw sql
 func (s *DB) Exec(sql string, values ...interface{}) *DB {
-	scope := s.NewScope(nil)
+	var scope *Scope
+	if isReadQuery(sql) {
+		scope = s.NewScope(nil, true)
+	} else {
+		scope = s.NewScope(nil)
+	}
+
 	generatedSQL := scope.buildCondition(map[string]interface{}{"query": sql, "args": values}, true)
 	generatedSQL = strings.TrimSuffix(strings.TrimPrefix(generatedSQL, "("), ")")
 	scope.Raw(generatedSQL)
@@ -848,40 +860,19 @@ func (s *DB) GetErrors() []error {
 // Private Methods For DB
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *DB) clone(isRead ...bool) *DB {
-	var db = &DB{}
-	ranNum := rand.Float32()
-	if len(isRead) != 0 &&
-		isRead[0] == true &&
-		s.readDB != nil &&
-		ranNum >= s.readWeight {
-		db = &DB{
-			db:                s.readDB,
-			parent:            s.parent,
-			logger:            s.logger,
-			logMode:           s.logMode,
-			Value:             s.Value,
-			Error:             s.Error,
-			blockGlobalUpdate: s.blockGlobalUpdate,
-			dialect:           newDialect(s.dialect.GetName(), s.db),
-			nowFuncOverride:   s.nowFuncOverride,
-			readDB:            s.readDB,
-			readWeight:        s.readWeight,
-		}
-	} else {
-		db = &DB{
-			db:                s.db,
-			parent:            s.parent,
-			logger:            s.logger,
-			logMode:           s.logMode,
-			Value:             s.Value,
-			Error:             s.Error,
-			blockGlobalUpdate: s.blockGlobalUpdate,
-			dialect:           newDialect(s.dialect.GetName(), s.db),
-			nowFuncOverride:   s.nowFuncOverride,
-			readDB:            s.readDB,
-			readWeight:        s.readWeight,
-		}
+func (s *DB) clone() *DB {
+	db := &DB{
+		db:                s.db,
+		parent:            s.parent,
+		logger:            s.logger,
+		logMode:           s.logMode,
+		Value:             s.Value,
+		Error:             s.Error,
+		blockGlobalUpdate: s.blockGlobalUpdate,
+		dialect:           newDialect(s.dialect.GetName(), s.db),
+		nowFuncOverride:   s.nowFuncOverride,
+		readDB:            s.readDB,
+		readWeight:        s.readWeight,
 	}
 
 	s.values.Range(func(k, v interface{}) bool {
@@ -913,4 +904,10 @@ func (s *DB) slog(sql string, t time.Time, vars ...interface{}) {
 	if s.logMode == detailedLogMode {
 		s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected)
 	}
+}
+
+//util function
+func isReadQuery(query string) bool {
+	re := regexp.MustCompile(`select`)
+	return re.MatchString(strings.ToLower(query))
 }
