@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
