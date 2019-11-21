@@ -1,4 +1,4 @@
-module github.com/marverlous811/gorm
+module github.com/ows-vn/gorm
 
 go 1.12
 
