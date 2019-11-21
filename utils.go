@@ -224,3 +224,8 @@ func addExtraSpaceIfExist(str string) string {
 	}
 	return ""
 }
+
+func isReadQuery(query string) bool {
+	re := regexp.MustCompile(`select`)
+	return re.MatchString(strings.ToLower(query))
+}

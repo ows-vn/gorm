@@ -905,9 +905,3 @@ func (s *DB) slog(sql string, t time.Time, vars ...interface{}) {
 		s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected)
 	}
 }
-
-//util function
-func isReadQuery(query string) bool {
-	re := regexp.MustCompile(`select`)
-	return re.MatchString(strings.ToLower(query))
-}
