@@ -159,6 +159,11 @@ func (s *DB) DB() *sql.DB {
 	return db
 }
 
+func (s *DB) ReadDB() *sql.DB {
+	db, _ := s.readDB.(*sql.DB)
+	return db
+}
+
 // CommonDB return the underlying `*sql.DB` or `*sql.Tx` instance, mainly intended to allow coexistence with legacy non-GORM code.
 func (s *DB) CommonDB() SQLCommon {
 	return s.db
